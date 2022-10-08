@@ -24,31 +24,31 @@ translators = ["liuyuran"]
 
 <!-- toc -->
 
-## Introduction
+## 前言
 
-The [previous post] gave an introduction to the concept of paging. It motivated paging by comparing it with segmentation, explained how paging and page tables work, and then introduced the 4-level page table design of `x86_64`. We found out that the bootloader already set up a page table hierarchy for our kernel, which means that our kernel already runs on virtual addresses. This improves safety since illegal memory accesses cause page fault exceptions instead of modifying arbitrary physical memory.
+经过 [前文][previous post] 的讲解，我们对分页的概念已经有了一定了解，其中已经详细阐述分页相对于分段的优点、分页如何工作以及 `x86_64` 平台下4级页表的部分设计细节。我们也知道了 bootloader 自动化的为我们的内核完成了多层级页表的创建工作，因此内核也是基于虚拟地址运行的，虚拟地址改善了内存安全性，因为如果发生了无效的内存访问，就会抛出 page fault 异常，而不会破坏掉其他内存区域。
 
 [previous post]: @/edition-2/posts/08-paging-introduction/index.md
 
-The post ended with the problem that we [can't access the page tables from our kernel][end of previous post] because they are stored in physical memory and our kernel already runs on virtual addresses. This post continues at this point and explores different approaches of making the page table frames accessible to our kernel. We will discuss the advantages and drawbacks of each approach and then decide for an approach for our kernel.
+在前文的末尾，我们以 [无法在内核中访问页表][end of previous post] 这个问题结束了话题，页表储存在物理内存中，而内核却运行在虚拟地址的框架下，这就是问题的初步答案。在本文中，我们会继续对于此问题的探索，寻求一种能够解决问题的办法，当然，方法的确不止一种，我们会罗列这些方法的优缺点并最终确定最终方案。
 
 [end of previous post]: @/edition-2/posts/08-paging-introduction/index.md#accessing-the-page-tables
 
-To implement the approach, we will need support from the bootloader, so we'll configure it first. Afterward, we will implement a function that traverses the page table hierarchy in order to translate virtual to physical addresses. Finally, we learn how to create new mappings in the page tables and how to find unused memory frames for creating new page tables.
+要实现这个功能，我们首先需要配置一下 bootloader，其次应当实现一个能够遍历多层页表数据结构的地址转换函数，最后我们会真正开始尝试创建新的内存映射，以及如何查找未使用的内存区域。
 
-## Accessing Page Tables
+## 访问页表
 
-Accessing the page tables from our kernel is not as easy as it may seem. To understand the problem let's take a look at the example 4-level page table hierarchy of the previous post again:
+从内核层次访问页表其实没有想象中的那么容易，我们先看一下前文中所展示过的4级页表数据结构：
 
 ![An example 4-level page hierarchy with each page table shown in physical memory](../paging-introduction/x86_64-page-table-translation.svg)
 
-The important thing here is that each page entry stores the _physical_ address of the next table. This avoids the need to run a translation for these addresses too, which would be bad for performance and could easily cause endless translation loops.
+这里的重点是，每个页表条目都存储着指向下一级页表 _物理_ 地址的指针，这是为了尽可能节省转换地址造成的性能消耗，以及避免可能出现的转换死循环。
 
-The problem for us is that we can't directly access physical addresses from our kernel since our kernel also runs on top of virtual addresses. For example, when we access address `4 KiB` we access the _virtual_ address `4 KiB`, not the _physical_ address `4 KiB` where the level 4 page table is stored. When we want to access the physical address `4 KiB`, we can only do so through some virtual address that maps to it.
+那么最大的问题就是，我们无法直接从内核访问物理地址，因为内核运行在虚拟地址的框架下，例如我们访问地址 `4 KiB`，实际上访问到的是 _虚拟_ 地址 `4 KiB`，而非4级页表所在的物理地址 `4 KiB`。所以我们需要通过分页模式本身的功能达成目的，比如将这个内存区域映射到虚拟地址框架内。
 
-So in order to access page table frames, we need to map some virtual pages to them. There are different ways to create these mappings that all allow us to access arbitrary page table frames.
+所以为了能够访问页表所在的页帧，我们确实需要将其映射为虚拟地址，而这个方案也有很多种不同的解决方案。
 
-### Identity Mapping
+### 一致映射
 
 A simple solution is to **identity map all page tables**:
 
@@ -63,7 +63,7 @@ However, it clutters the virtual address space and makes it more difficult to fi
 
 Equally, it makes it much more difficult to create new page tables, because we need to find physical frames whose corresponding pages aren't already in use. For example, let's assume that we reserved the _virtual_ 1000 KiB memory region starting at `1008 KiB` for our memory-mapped file. Now we can't use any frame with a _physical_ address between `1000 KiB` and `2008 KiB` anymore, because we can't identity map it.
 
-### Map at a Fixed Offset
+### 偏移量映射
 
 To avoid the problem of cluttering the virtual address space, we can **use a separate memory region for page table mappings**. So instead of identity mapping page table frames, we map them at a fixed offset in the virtual address space. For example, the offset could be 10 TiB:
 
@@ -73,7 +73,7 @@ By using the virtual memory in the range `10TiB..(10TiB + physical memory size)`
 
 This approach still has the disadvantage that we need to create a new mapping whenever we create a new page table. Also, it does not allow accessing page tables of other address spaces, which would be useful when creating a new process.
 
-### Map the Complete Physical Memory
+### 完全物理地址映射
 
 We can solve these problems by **mapping the complete physical memory** instead of only page table frames:
 
@@ -87,7 +87,7 @@ On x86_64, however, we can use [huge pages] with size 2MiB for the mapping, inst
 
 [huge pages]: https://en.wikipedia.org/wiki/Page_%28computer_memory%29#Multiple_page_sizes
 
-### Temporary Mapping
+### 临时映射
 
 For devices with very small amounts of physical memory, we could **map the page tables frames only temporarily** when we need to access them. To be able to create the temporary mappings we only need a single identity-mapped level 1 table:
 
@@ -111,7 +111,7 @@ The process for accessing an arbitrary page table frame with temporary mappings 
 
 This approach reuses the same 512 virtual pages for creating the mappings and thus requires only 4KiB of physical memory. The drawback is that it is a bit cumbersome, especially since a new mapping might require modifications of multiple table levels, which means that we would need to repeat the above process multiple times.
 
-### Recursive Page Tables
+### 递归页表
 
 Another interesting approach, that requires no additional page tables at all, is to **map the page table recursively**. The idea behind this approach is to map some entry of the level 4 page table to the level 4 table itself. By doing this, we effectively reserve a part of the virtual address space and map all current and future page table frames to that space.
 
@@ -266,7 +266,7 @@ However, it also has some disadvantages:
 
 [_Remap The Kernel_]: https://os.phil-opp.com/remap-the-kernel/#overview
 
-## Bootloader Support
+## Bootloader 支持
 
 All of these approaches require page table modifications for their setup. For example, mappings for the physical memory need to be created or an entry of the level 4 table needs to be mapped recursively. The problem is that we can't create these required mappings without an existing way to access the page tables.
 
@@ -286,7 +286,7 @@ bootloader = { version = "0.9.8", features = ["map_physical_memory"]}
 
 With this feature enabled, the bootloader maps the complete physical memory to some unused virtual address range. To communicate the virtual address range to our kernel, the bootloader passes a _boot information_ structure.
 
-### Boot Information
+### 启动信息
 
 The `bootloader` crate defines a [`BootInfo`] struct that contains all the information it passes to our kernel. The struct is still in an early stage, so expect some breakage when updating to future [semver-incompatible] bootloader versions. With the `map_physical_memory` feature enabled, it currently has the two fields `memory_map` and `physical_memory_offset`:
 
@@ -311,7 +311,7 @@ pub extern "C" fn _start(boot_info: &'static BootInfo) -> ! { // new argument
 
 It wasn't a problem to leave off this argument before because the x86_64 calling convention passes the first argument in a CPU register. Thus, the argument is simply ignored when it isn't declared. However, it would be a problem if we accidentally used a wrong argument type, since the compiler doesn't know the correct type signature of our entry point function.
 
-### The `entry_point` Macro
+### `entry_point` 宏
 
 Since our `_start` function is called externally from the bootloader, no checking of our function signature occurs. This means that we could let it take arbitrary arguments without any compilation errors, but it would fail or cause undefined behavior at runtime.
 
@@ -356,7 +356,7 @@ fn test_kernel_main(_boot_info: &'static BootInfo) -> ! {
 
 Since the entry point is only used in test mode, we add the `#[cfg(test)]` attribute to all items. We give our test entry point the distinct name `test_kernel_main` to avoid confusion with the `kernel_main` of our `main.rs`. We don't use the `BootInfo` parameter for now, so we prefix the parameter name with a `_` to silence the unused variable warning.
 
-## Implementation
+## 具体实现
 
 Now that we have access to physical memory, we can finally start to implement our page table code. First, we will take a look at the currently active page tables that our kernel runs on. In the second step, we will create a translation function that returns the physical address that a given virtual address is mapped to. As the last step, we will try to modify the page tables in order to create a new mapping.
 
@@ -479,7 +479,7 @@ For looking at the level 2 and level 1 tables, we repeat that process for the le
 
 Traversing the page tables manually is interesting because it helps to understand how the CPU performs the translation. However, most of the time we are only interested in the mapped physical address for a given virtual address, so let's create a function for that.
 
-### Translating Addresses
+### 地址转换
 
 For translating a virtual to a physical address, we have to traverse the four-level page table until we reach the mapped frame. Let's create a function that performs this translation:
 
@@ -991,17 +991,18 @@ While our `create_example_mapping` function is just some example code, we are no
 
 At this point, we should delete the `create_example_mapping` function again to avoid accidentally invoking undefined behavior, as explained [above](#a-create-example-mapping-function).
 
-## Summary
+## 小结
 
-In this post we learned about different techniques to access the physical frames of page tables, including identity mapping, mapping of the complete physical memory, temporary mapping, and recursive page tables. We chose to map the complete physical memory since it's simple, portable, and powerful.
+在本文中，我们学会了直接访问页表所在内存帧的若干种技术，包括一致映射、偏移量映射、完全物理地址映射、临时映射和递归页表。最终我们选择了物理地址映射，因为其简单、轻便并且其功能也很强大。
 
-We can't map the physical memory from our kernel without page table access, so we needed support from the bootloader. The `bootloader` crate supports creating the required mapping through optional cargo features. It passes the required information to our kernel in the form of a `&BootInfo` argument to our entry point function.
+当然，我们无法绕过页表的权限机制直接在内核中映射物理内存，所以需要寻求bootloader的帮助。而通过添加特定 future，`bootloader` crate 支持直接创建映射条目，仅仅需要拼接一个 `&BootInfo` 结构，并传入指定函数即可。
 
-For our implementation, we first manually traversed the page tables to implement a translation function, and then used the `MappedPageTable` type of the `x86_64` crate. We also learned how to create new mappings in the page table and how to create the necessary `FrameAllocator` on top of the memory map passed by the bootloader.
+在我们对地址转换函数的实现中，我们首先需要遍历页表，并使用 `x86_64` crate 中的 `MappedPageTable` 完成该功能。
+同时我们也学会了如何人工创建内存映射，以及如何在内存映射的上方创建必要的 `FrameAllocator`（TODO: ？）。
 
-## What's next?
+## 下文预告
 
-The next post will create a heap memory region for our kernel, which will allow us to [allocate memory] and use various [collection types].
+在下一篇文章中，我们会为我们的内核创建堆内存区域，这样我们就可以人工 [分配内存][allocate memory]，或者使用 [集合类型][collection types] 及其衍生类型。
 
 [allocate memory]: https://doc.rust-lang.org/alloc/boxed/struct.Box.html
 [collection types]: https://doc.rust-lang.org/alloc/collections/index.html
