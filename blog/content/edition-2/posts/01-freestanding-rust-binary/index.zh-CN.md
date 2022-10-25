@@ -46,7 +46,7 @@ translators = ["luojia65", "Rustin-Liu", "TheBegining"]
 cargo new blog_os --bin --edition 2018
 ```
 
-在这里我把项目命名为 `blog_os`，当然读者也可以选择自己的项目名称。默认情况下，即使不显式指定，cargo 也会为我们添加`--bin` 选项，说明我们将要创建一个可执行文件（而不是一个库）； 另外 `--edition 2018` 参数了指明项目的包要使用 Rust 的 **2018 版次**（[2018 edition]），但在默认情况下，该参数会指向本地安装的最新版本。当我们成功执行这行指令后，cargo 为我们创建的目录结构如下：
+在这里我把项目命名为 `blog_os`，当然读者也可以选择自己的项目名称。默认情况下，即使不显式指定，cargo 也会为我们添加`--bin` 选项，说明我们将要创建一个可执行文件（而不是一个库）； 另外 `--edition 2018` 参数指明了项目的包要使用 Rust 的 **2018 版次**（[2018 edition]），但在默认情况下，该参数会指向本地安装的最新版本。当我们成功执行这行指令后，cargo 为我们创建的目录结构如下：
 
 [2018 edition]: https://doc.rust-lang.org/nightly/edition-guide/rust-2018/index.html
 
@@ -158,7 +158,7 @@ error: requires `start` lang_item
 
 我们通常会认为，当运行一个程序时，首先被调用的是 `main` 函数。但是，大多数语言都拥有一个**运行时系统**（[runtime system](https://en.wikipedia.org/wiki/Runtime_system)），它通常为**垃圾回收**（garbage collection）或**绿色线程**（software threads，或 green threads）服务，如 Java 的 GC 或 Go 语言的协程（goroutine）；这个运行时系统需要在 main 函数前启动，因为它需要让程序初始化。
 
-在一个典型的使用标准库的 Rust 程序中，程序运行是从一个名为 `crt0` 的运行时库开始的。`crt0` 意为 C runtime zero，它能建立一个适合运行 C 语言程序的环境，这包含了栈的创建和可执行程序参数的传入。在这之后，这个运行时库会调用 [Rust 的运行时入口点](https://github.com/rust-lang/rust/blob/bb4d1491466d8239a7a5fd68bd605e3276e97afb/src/libstd/rt.rs#L32-L73)，这个入口点被称作 **start语言项**（"start" language item）。Rust 只拥有一个极小的运行时，它被设计为拥有较少的功能，如爆栈检测和打印**堆栈轨迹**（stack trace）。这之后，这个运行时将会调用 main 函数。
+在一个典型的使用标准库的 Rust 程序中，程序运行是从一个名为 `crt0` 的运行时库开始的。`crt0` 意为 C runtime zero，它能建立一个适合运行 C 语言程序的环境，这包含了栈的创建和可执行程序参数的传入。在这之后，这个运行时库会调用 [Rust 的运行时入口点](https://github.com/rust-lang/rust/blob/bb4d1491466d8239a7a5fd68bd605e3276e97afb/src/libstd/rt.rs#L32-L73)，这个入口点被称作 **start语言项**（"start" language item）。Rust 只拥有一个极小的运行时，它被设计为拥有较少的功能，如爆栈检测和打印**栈轨迹**（stack trace）。这之后，这个运行时将会调用 main 函数。
 
 我们的独立式可执行程序并不能访问 Rust 运行时或 `crt0` 库，所以我们需要定义自己的入口点。只实现一个 `start` 语言项并不能帮助我们，因为这之后程序依然要求 `crt0` 库。所以，我们要做的是，直接重写整个 `crt0` 库和它定义的入口点。
 
