@@ -1,5 +1,5 @@
 +++
-title = "CPU Exceptions"
+title = "CPU 예외 (Exception)"
 weight = 5
 path = "ko/cpu-exceptions"
 date  = 2018-06-17
@@ -14,7 +14,7 @@ translators = ["JOE1994"]
 translation_contributors = ["KimWang906"]
 +++
 
-CPU 예외 (exception)는 유효하지 않은 메모리 주소에 접근하거나 분모가 0인 나누기 연산을 하는 등 허용되지 않은 작업이 실행 시 발생합니다. CPU 예외를 포착하고 처리할 수 있으려면 예외 처리 함수 정보를 제공하는 _인터럽트 서술자 테이블 (interrupt descriptor table; IDT)_ 을 설정해 두어야 합니다. 이 글에서는 커널이 [breakpoint 예외][breakpoint exceptions]를 처리한 후 정상 실행을 재개할 수 있게 구현하는 과정을 다룹니다.
+CPU 예외 (exception)는 유효하지 않은 메모리 주소에 접근하거나 분모가 0인 나누기 연산을 하는 등 허용되지 않은 작업 실행 시 발생합니다. CPU 예외를 처리할 수 있으려면 예외 처리 함수 정보를 제공하는 _인터럽트 서술자 테이블 (interrupt descriptor table; IDT)_ 을 설정해 두어야 합니다. 이 글에서는 커널이 [breakpoint 예외][breakpoint exceptions]를 처리한 후 정상 실행을 재개할 수 있도록 구현할 것입니다.
 
 [breakpoint exceptions]: https://wiki.osdev.org/Exceptions#Breakpoint
 
@@ -46,14 +46,14 @@ x86 아키텍처에는 20가지 정도의 CPU 예외가 존재합니다. 그 중
 
 [exceptions]: https://wiki.osdev.org/Exceptions
 
-### 인터럽트 서술사 테이블 (Interrupt Descriptor Table)
+### 인터럽트 서술사 테이블 (Interrupt Descriptor Table) {#the-interrupt-descriptor-table}
 예외 발생을 포착하고 대응할 수 있으려면 _인터럽트 서술자 테이블 (Interrupt Descriptor Table; IDT)_ 이 필요합니다.
 이 테이블을 통해 우리는 각각의 CPU 예외를 어떤 예외 처리 함수가 처리할지 지정합니다. 하드웨어에서 이 테이블을 직접 사용하므로 테이블의 형식은 정해진 표준에 따라야 합니다. 테이블의 각 엔트리는 아래와 같은 16 바이트 구조를 따릅니다:
 
 | 타입 | 이름                     | 설명                                                                                                          |
 | ---- | ------------------------ | ------------------------------------------------------------------------------------------------------------- |
 | u16  | Function Pointer [0:15]  | 예외 처리 함수에 대한 64비트 포인터의 하위 16비트                                                             |
-| u16  | GDT selector             | [글로벌 디스크립터 테이블 (global descriptor table)][global descriptor table]에서 코드 세그먼트를 선택하는 값 |
+| u16  | GDT selector             | [전역 서술자 테이블 (global descriptor table)][global descriptor table]에서 코드 세그먼트를 선택하는 값 |
 | u16  | Options                  | (표 아래의 설명 참조)                                                                                         |
 | u16  | Function Pointer [16:31] | 예외 처리 함수에 대한 64비트 포인터의 2번째 하위 16비트                                                       |
 | u32  | Function Pointer [32:63] | 예외 처리 함수에 대한 64비트 포인터의 상위 32비트                                                             |
@@ -87,7 +87,7 @@ Options 필드는 아래의 형식을 갖습니다:
 [RFLAGS]: https://en.wikipedia.org/wiki/FLAGS_register
 [GDT]: https://en.wikipedia.org/wiki/Global_Descriptor_Table
 
-위의 4단계와 5단계가 잘 이해되지 않아도 걱정 마세요. 글로벌 디스크립터 테이블 (Global Descriptor Table; GDT)과 하드웨어 인터럽트는 이후에 다른 글에서 더 설명할 것입니다.
+위의 4단계와 5단계가 잘 이해되지 않아도 걱정 마세요. 전역 서술자 테이블 (Global Descriptor Table; GDT)과 하드웨어 인터럽트는 이후에 다른 글에서 더 설명할 것입니다.
 
 ## IDT 타입
 IDT를 나타내는 타입을 직접 구현하지 않고 `x86_64` 크레이트의 [`InterruptDescriptorTable` 구조체][`InterruptDescriptorTable` struct] 타입을 사용합니다:
@@ -180,7 +180,7 @@ x86_64에서는 C 함수 호출 규약이 preserved 레지스터와 scratch 레�
 
 함수 실행 시작 시 모든 레지스터들의 값이 스택에 저장된다는 뜻은 아닙니다. 호출된 함수가 덮어 쓸 레지스터들만을 컴파일러가 스택에 백업합니다. 이렇게 하면 적은 수의 레지스터를 사용하는 함수를 컴파일 할 때 짧고 효율적인 코드를 생성할 수 있습니다.
 
-### 인터럽트 스택 프레임
+### 인터럽트 스택 프레임 {# the-interrupt-stack-frame}
 일반적인 함수 호출 시 (`call` 명령어 이용), CPU는 호출된 함수로 제어 흐름을 넘기기 전에 반환 주소를 스택에 push (저장)합니다. 함수 반환 시 (`ret` 명령어 이용), CPU는 스택에 저장해뒀던 반환 주소를 읽어온 후 해당 주소로 점프합니다. 일반적인 함수 호출 시 스택 프레임의 모습은 아래와 같습니다:
 
 ![function stack frame](function-stack-frame.svg)
@@ -348,7 +348,7 @@ pub fn init_idt() {
 }
 ```
 
-이제 컴파일 오류가 발생하지는 않지만, Rust에서 `static mut`의 사용은 권장되지 않습니다. `static mut`는 데이터 경쟁 상태 (data race)를 일으키기 쉽기에, `static mut` 변수에 접근할 때마다 [`unsafe` 블록][`unsafe` block]을 반드시 사용해야 합니다.
+이제 컴파일 오류가 발생하지는 않지만, Rust에서 `static mut`의 사용은 권장되지 않습니다. `static mut`는 데이터 레이스 (data race)를 일으키기 쉽기에, `static mut` 변수에 접근할 때마다 [`unsafe` 블록][`unsafe` block]을 반드시 사용해야 합니다.
 
 [`unsafe` block]: https://doc.rust-lang.org/1.30.0/book/second-edition/ch19-01-unsafe-rust.html#unsafe-superpowers
 
